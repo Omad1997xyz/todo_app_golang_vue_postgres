@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"database/sql"
-	"flag"
 	"fmt"
 	_ "github.com/lib/pq"
 	"log"
-	"os"
+	"net/http"
 	"strconv"
-	"strings"
 )
+
+var db *sql.DB // GLOBAL DB
 
 const (
 	host     = "localhost"
@@ -21,26 +20,26 @@ const (
 )
 
 func main() {
-	interactive := flag.Bool("i", false, "Interactive mode")
-	flag.Parse()
+	dataConnection()
+	http.HandleFunc("/add", add)
+	http.HandleFunc("/complete", complete)
+	http.HandleFunc("/lists", list)
+	http.HandleFunc("/delete", delete)
 
-	if *interactive {
-		interactiveMode()
-	}
+	fmt.Println("Server running on :8080 ...")
+	http.ListenAndServe(":8080", nil)
 }
 
-func interactiveMode() {
-	general := bufio.NewScanner(os.Stdin)
-
+func dataConnection() {
 	/***** DATABASE *****/
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
-	db, err := sql.Open("postgres", psqlInfo)
+	var err error
+	db, err = sql.Open("postgres", psqlInfo)
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close()
 
 	err = db.Ping()
 	if err != nil {
@@ -63,99 +62,82 @@ func interactiveMode() {
 	}
 	fmt.Println("Table ready to use!")
 	/*----- DATABASE -----*/
+}
 
-	for {
-		fmt.Print("> ")
+func add(w http.ResponseWriter, req *http.Request) {
+	name := req.FormValue("name")
 
-		if !general.Scan() {
-			break
-		}
+	_, err := db.Exec(`INSERT INTO todolist (name, done) VALUES ($1, false)`, name)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 
-		txt := general.Text()
-		parts := strings.SplitN(txt, " ", 2)
+	fmt.Printf("Item %s inserted successfully!\n", name)
+}
 
-		command := parts[0]
+func complete(w http.ResponseWriter, req *http.Request) {
+	idStr := req.FormValue("id")
+	id_done, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid id", 400)
+		return
+	}
 
-		switch command {
-		case "add":
-			var done bool
-
-			fmt.Println("Item nomi: ")
-			name := parts[1]
-
-			qoshish := `INSERT INTO todolist (name, done) VALUES ($1, $2)`
-
-			_, err = db.Exec(qoshish, name, done)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("Item %s inserted successfully!\n", name)
-
-		case "complete":
-			fmt.Println("Item raqami: ")
-			index := parts[1]
-			id_done, errr := strconv.Atoi(index)
-			if errr != nil {
-				panic(errr)
-			}
-
-			update := (`
+	update := (`
         UPDATE todolist
 		SET done = true
 		WHERE id = $1;
     `)
 
-			_, err = db.Exec(update, id_done)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println("Item updated to done:", id_done)
-
-		case "lists":
-
-			rows, err := db.Query(`select name, done from todolist ORDER BY id ASC`)
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer rows.Close()
-			counter := 1
-			for rows.Next() {
-				var name string
-				var done bool
-				var status string
-
-				if err := rows.Scan(&name, &done); err != nil {
-					log.Fatal(err)
-				}
-
-				if done == true {
-					status = "+"
-				} else if done == false {
-					status = "-"
-				}
-
-				fmt.Printf("%d. [%s] %s\n", counter, status, name)
-				counter++
-			}
-
-		case "delete":
-			delete_name := parts[1]
-
-			res, err := db.Exec(`delete from todolist where name=$1`, delete_name)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			affected, _ := res.RowsAffected()
-
-			if affected == 0 {
-				fmt.Println("Item topilmadi.")
-			} else {
-				fmt.Printf("Item %s deleted successfully!\n", delete_name)
-			}
-
-		default:
-			fmt.Println("Write one of these first: -add, -complete, -lists, -delete.")
-		}
+	_, err = db.Exec(update, id_done)
+	if err != nil {
+		panic(err)
 	}
+
+	fmt.Fprintf(w, "Item %d marked complete\n", id_done)
+}
+
+func list(w http.ResponseWriter, req *http.Request) {
+	rows, err := db.Query(`SELECT id, name, done FROM todolist ORDER BY id ASC`)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int
+		var name string
+		var done bool
+
+		if err := rows.Scan(&id, &name, &done); err != nil {
+			log.Println(err)
+			continue
+		}
+
+		status := "-"
+		if done {
+			status = "+"
+		}
+
+		fmt.Fprintf(w, "%d) %s [%s]\n", id, name, status)
+	}
+}
+
+func delete(w http.ResponseWriter, req *http.Request) {
+	idStr := req.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid id", 400)
+		return
+	}
+
+	_, err = db.Exec(`DELETE FROM todolist WHERE id = $1`, id)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintf(w, "Item %d deleted\n", id)
 }
