@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <title>Todo App — Vue.js Frontend</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 30px auto;
+        }
+        .todo-item {
+            padding: 10px;
+            border: 1px solid #ccc;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .done {
+            text-decoration: line-through;
+            color: green;
+        }
+        button {
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <h1>Todo List</h1>
+
+    <!-- Add form -->
+    <div>
+        <input v-model="newName" placeholder="Yangi item yozing..." />
+        <button @click="addItem">Qo‘shish</button>
+    </div>
+
+    <hr>
+
+    <!-- Todo items -->
+    <div v-for="item in items" :key="item.id" class="todo-item">
+
+  <span :class="{done: item.done}">
+    {{ item.displayID }} — {{ item.name }}
+  </span>
+
+        <div>
+            <button v-if="!item.done" @click="completeItem(item.id)">✔</button>
+            <button @click="deleteItem(item.id)">🗑</button>
+        </div>
+
+    </div>
+</div>
+
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            return {
+                items: [],
+                newName: ""
+            };
+        },
+
+        mounted() {
+            this.loadItems();
+        },
+
+        methods: {
+            // Load list
+            async loadItems() {
+                const res = await fetch("/lists");
+                this.items = await res.json();
+            },
+
+            // Add item
+            async addItem() {
+                if (!this.newName.trim()) return;
+
+                const form = new FormData();
+                form.append("name", this.newName);
+
+                await fetch("/add", {
+                    method: "POST",
+                    body: form
+                });
+
+                this.newName = "";
+                this.loadItems();
+            },
+
+            // Complete item
+            async completeItem(id) {
+                const form = new FormData();
+                form.append("id", id);
+
+                await fetch("/complete", {
+                    method: "POST",
+                    body: form
+                });
+
+                this.loadItems();
+            },
+
+            // Delete item
+            async deleteItem(id) {
+                const form = new FormData();
+                form.append("id", id);
+
+                await fetch("/delete", {
+                    method: "POST",
+                    body: form
+                });
+
+                this.loadItems();
+            }
+        }
+    }).mount("#app");
+</script>
+
+</body>
+</html>

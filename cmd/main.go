@@ -2,9 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	_ "github.com/lib/pq"
-	"log"
 	"net/http"
 	"strconv"
 )
@@ -25,6 +25,7 @@ func main() {
 	http.HandleFunc("/complete", complete)
 	http.HandleFunc("/lists", list)
 	http.HandleFunc("/delete", delete)
+	http.Handle("/", http.FileServer(http.Dir("./static")))
 
 	fmt.Println("Server running on :8080 ...")
 	http.ListenAndServe(":8080", nil)
@@ -73,60 +74,60 @@ func add(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	fmt.Printf("Item %s inserted successfully!\n", name)
+	fmt.Fprintf(w, "Item %s inserted successfully!\n", name)
 }
 
-func complete(w http.ResponseWriter, req *http.Request) {
-	idStr := req.FormValue("id")
-	id_done, err := strconv.Atoi(idStr)
+func complete(w http.ResponseWriter, r *http.Request) {
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid id", 400)
 		return
 	}
 
-	update := (`
-        UPDATE todolist
-		SET done = true
-		WHERE id = $1;
-    `)
-
-	_, err = db.Exec(update, id_done)
+	_, err = db.Exec(`UPDATE todolist SET done = true WHERE id = $1`, id)
 	if err != nil {
-		panic(err)
+		http.Error(w, err.Error(), 500)
+		return
 	}
 
-	fmt.Fprintf(w, "Item %d marked complete\n", id_done)
+	fmt.Fprintf(w, "Completed id: %d", id)
 }
 
-func list(w http.ResponseWriter, req *http.Request) {
-	rows, err := db.Query(`SELECT id, name, done FROM todolist ORDER BY id ASC`)
+func list(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, name, done FROM todolist ORDER BY id")
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	defer rows.Close()
 
+	var res []map[string]interface{}
+	displayID := 1
+
 	for rows.Next() {
-		var id int
+		var dbID int
 		var name string
 		var done bool
 
-		if err := rows.Scan(&id, &name, &done); err != nil {
-			log.Println(err)
-			continue
-		}
+		rows.Scan(&dbID, &name, &done)
 
-		status := "-"
-		if done {
-			status = "+"
-		}
+		res = append(res, map[string]interface{}{
+			"displayID": displayID, // Front uchun 1,2,3
+			"id":        dbID,      // Asl database ID
+			"name":      name,
+			"done":      done,
+		})
 
-		fmt.Fprintf(w, "%d) %s [%s]\n", id, name, status)
+		displayID++
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
-func delete(w http.ResponseWriter, req *http.Request) {
-	idStr := req.FormValue("id")
+func delete(w http.ResponseWriter, r *http.Request) {
+	idStr := r.FormValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid id", 400)
@@ -139,5 +140,5 @@ func delete(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	fmt.Fprintf(w, "Item %d deleted\n", id)
+	fmt.Fprintf(w, "Deleted id: %d", id)
 }
